@@ -1,0 +1,355 @@
+---
+title: "Dietary Protein Modulates Experimental Colitis - Linear Mixed Effects Model"
+author: "Simon Gray"
+date: "2026-01-01"
+output:
+  pdf_document:
+    latex_engine: xelatex
+header-includes:
+  - \usepackage{fvextra}
+  - \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+  - \DefineVerbatimEnvironment{verbatim}{Verbatim}{breaklines}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Linear Mixed Effects Model
+
+```{r libraries, include=FALSE}
+library(lme4)
+library(lmerTest)
+library(tidyr)
+library(ggplot2)
+library(dplyr)
+library(readr)
+library(emmeans)
+library(broom)
+library(broom.mixed)
+```
+
+```{r working directory, include=FALSE}
+# setwd("/Users/smgraymd/Documents/Documents\ -\ Simon’s\ MacBook\ Pro\ 16in/Sartor\ lab/Projects/Project\ E\ -\ contracts\ and\ collaborations/David\ Montrose/ExpDM27\ -\ linear\ mixed\ effects\ model\ for\ diet\ colitis\ phenotype")
+setwd("/Users/simongray/Documents/Documents\ -\ Simon’s\ MacBook\ Pro\ 16in/Sartor\ lab/Projects/Project\ E\ -\ contracts\ and\ collaborations/David\ Montrose/ExpDM27\ -\ linear\ mixed\ effects\ model\ for\ diet\ colitis\ phenotype")
+
+```
+
+### Data
+
+Import data CSV
+```{r Import data, include=TRUE, echo=TRUE, results="hide", message=FALSE, warning=FALSE}
+df <- read_csv("LMM_database.csv")
+```
+
+Filter the database for beef protein diet `Beef_Cellulose` or pea protein diet `Pea_Cellulose` across experiments.
+
+```{r Filter dataframe}
+df_BP_PP <- df %>% filter(Diet %in% c("Beef_Cellulose","Pea_Cellulose")) %>% filter(ExpNo %in% c("DM12","DM17","DM19"))
+```
+
+Log10 normalize fecal lipocalin-2 `fLCN2` data. All fLCN2 values are >0.
+```{r log10(fLCN2)}
+df_BP_PP$fLCN2 <- log10(df_BP_PP$fLCN2)
+```
+
+### Build Linear Mixed Effects Models
+
+#### fLCN2
+We fitted a linear mixed effects model with fixed slope, REML=True (best fit estimator) to test the effects of diet (fixed effect, `Beef_Cellulose` vs `Pea_Cellulose`), sex (fixed effect, male vs female), the interaction of diet x sex, experiment batch `ExpNo` (fixed effect), and cage membership (random effect, `UniversalCageNumber`) on fecal lipocalin-2 level `fLCN2`. Preliminary analysis demonstrated that inclusion of `ExpNo` as a fixed effect term improved model fit.
+
+```{r fLCN2_LMM}
+# Preliminary analysis of model with and without ExpNo as fixed term, REML=FALSE.
+BP_PP_LMM_model_no_ExpNo <- lmer(fLCN2 ~ Diet * Sex + (1|UniversalCageNumber), data = df_BP_PP, REML=FALSE)
+BP_PP_LMM_model_WITH_ExpNo <- lmer(fLCN2 ~ Diet * Sex + ExpNo + (1|UniversalCageNumber), data = df_BP_PP, REML=FALSE)
+# Compare model fit with and without ExpNo term
+anova(BP_PP_LMM_model_no_ExpNo, BP_PP_LMM_model_WITH_ExpNo)
+
+#Fixed slope, REML=TRUE (best fit estimator)
+BP_PP_LMM_model <- lmer(fLCN2 ~ Diet * Sex + ExpNo + (1|UniversalCageNumber), data = df_BP_PP, REML=TRUE)
+
+#LMM results
+summary(BP_PP_LMM_model)
+#Statistical test for fixed effect terms (test if fixed effect term improves models explanation of the data) - diet, sex, diet x sex interaction, ExpNo
+anova(BP_PP_LMM_model)
+#Statistical test for random effect terms (test if random effect term improves models explanation of the data) - cage membership
+ranova(BP_PP_LMM_model)
+#Extract confidence intervals
+confint(BP_PP_LMM_model)
+
+```
+##### Results Interpretation for fLCN2
+
+###### Model Residuals and Confirmation of Assumptions 
+The model assumptions were confirmed by analysis of the residuals. Plotting residuals vs fitted showed no systematic patterns, with residuals evenly distributed around zero, confirming the assumptions of linearity and homoscedasticity.
+
+```{r fLCN2_LMM_residuals}
+plot(resid(BP_PP_LMM_model) ~ fitted(BP_PP_LMM_model))
+abline(h = 0, lty = 2)
+```
+
+The Q-Q plot of the residuals confirmed approximate normality with points falling on the theoretical diagonal.
+
+```{r fLCN2_LMM_normality}
+qqnorm(resid(BP_PP_LMM_model))
+qqline(resid(BP_PP_LMM_model))
+```
+
+###### Fixed Effects Analysis - Sex, Diet, Sex x Diet Interaction, ExpNo
+
+Significant contribution of fixed effect terms was assessed by Type III ANOVA. The diet term was highly significant (F(1,19.9) = 43.1, p = 2.221e-06) with an estimated difference of -1.31 log10 ng/g between `Pea_Cellulose` and `Beef_Cellulose` diets. Sex and interaction of `sex x diet` were non-significant (F(1,6.8) = 0.21, p = 0.66 and F(1,19.7) = 0.01, p= 0.92, respectively), demonstrating no sex effects or diet-sex interaction. Experiment batch was retained as a fixed effect term based on preliminary likelihood ratio testing (p=0.027); however, the Type III F-test for ExpNo was marginal (p=0.075), indicating inter-experiment variability was present but had minimal contribution to measured effects.
+
+```{r fLCN2_LMM_anova_fixed_effects}
+#Statistical test for fixed effect terms (test if fixed effect term improves models explanation of the data) - diet, sex, diet x sex interaction, ExpNo
+anova(BP_PP_LMM_model)
+```
+###### Random Effects Analysis - Cage Membership
+
+Contribution of the random effect term was assessed with likelihood ratio testing by `ranova()`. The random intercept for cage membership `UniversalCageNumber` was not significant (LRT = 0.029, p = 0.864), indicating negligible cage effect. The cage term was retained in the model due to nested cage `UniversalCageNumber` within experiment `ExpNo`.
+
+```{r fLCN2_LMM_ranova_random_effects}
+#Statistical test for random effect terms (test if random effect term improves models explanation of the data) - cage membership
+ranova(BP_PP_LMM_model)
+```
+
+###### Visualization of sex meta-data in diet groups
+
+To visually demonstrate how sex distributed within diet groups, sex meta-data was colored on a plot of diet by fLCN2 level, visually confirming that results do not cluster by sex.
+
+```{r fLCN2_metadata_visualization}
+#Visualization by meta-data
+p <- ggplot(df_BP_PP, aes(x=Diet, y=fLCN2)) +
+  geom_boxplot() +
+  ## plot all data points, colored by meta-data
+  geom_jitter(aes(color = Sex),
+              position = position_jitter(width=0.2),
+              alpha=1) +
+  ## Significance bar for Diet comparison
+  annotate("segment", x = 1, xend = 2, y = 5.5, yend = 5.5) +
+  annotate("text", x = 1.5, y = 5.8, label = "p < 0.0001", size = 5) +
+  ##
+  labs(title="fLCN2", y="fLCN2 log10(ng/g)") +
+  ## Plot theme formatting
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size=18),
+    axis.text = element_text(size=18),
+    axis.title=element_text(size=18),
+    legend.text = element_text(size=18),
+    legend.title = element_text(size=18)
+  )
+
+print(p)
+```
+
+#### Total Histology Score
+We fitted a linear mixed effects model with fixed slope, REML=True (best fit estimator) to test the effects of diet (fixed effect, `Beef_Cellulose` vs `Pea_Cellulose`), sex (fixed effect, male vs female), the interaction of diet x sex, experiment batch `ExpNo` (fixed effect), and cage membership (random effect, `UniversalCageNumber`) on histology `TotalHistoScore`. Preliminary analysis demonstrated that inclusion of `ExpNo` as a fixed effect term did not improve model fit, so `ExpNo` was dropped from the model.
+
+```{r Histo_LMM}
+# Preliminary analysis of model with and without ExpNo as fixed term, REML=FALSE.
+BP_PP_LMM_model_no_ExpNo <- lmer(TotalHistoScore ~ Diet * Sex + (1|UniversalCageNumber), data = df_BP_PP, REML=FALSE)
+BP_PP_LMM_model_WITH_ExpNo <- lmer(TotalHistoScore ~ Diet * Sex + ExpNo + (1|UniversalCageNumber), data = df_BP_PP, REML=FALSE)
+# Compare model fit with and without ExpNo term
+anova(BP_PP_LMM_model_no_ExpNo, BP_PP_LMM_model_WITH_ExpNo)
+
+#Fixed slope, REML=TRUE (best fit estimator)
+BP_PP_LMM_model <- lmer(TotalHistoScore ~ Diet * Sex + (1|UniversalCageNumber), data = df_BP_PP, REML=TRUE)                    
+
+#LMM results
+summary(BP_PP_LMM_model)
+#Fixed effects test
+anova(BP_PP_LMM_model)
+#Test if random effects improve fit
+ranova(BP_PP_LMM_model)
+#Extract confidence intervals
+confint(BP_PP_LMM_model)
+```
+
+##### Results Interpretation for Total Histology Score
+
+###### Model Residuals and Confirmation of Assumptions 
+The model assumptions were confirmed by analysis of the residuals. Plotting residuals vs fitted showed no systematic patterns, with residuals evenly distributed around zero, confirming the assumptions of linearity and homoscedasticity.
+
+```{r totalHisto_LMM_residuals}
+plot(resid(BP_PP_LMM_model) ~ fitted(BP_PP_LMM_model))
+abline(h = 0, lty = 2)
+```
+
+The Q-Q plot of the residuals confirmed approximate normality with points falling on the theoretical diagonal.
+
+```{r totalHisto_LMM_normality}
+qqnorm(resid(BP_PP_LMM_model))
+qqline(resid(BP_PP_LMM_model))
+```
+
+###### Fixed Effects Analysis - Sex, Diet, Sex x Diet Interaction
+
+Significant contribution of fixed effect terms was assessed by Type III ANOVA. The diet term was highly significant (F(1,34.4) = 83.1, p = 1.05e-10) with an estimated difference of -4.95 points on the 0–20 scale between `Pea_Cellulose` and `Beef_Cellulose` diets. Sex and interaction of `sex x diet` were non-significant (F(1,10.97) = 0.629, p = 0.44 and F(1,34.4) = 1.06, p= 0.31, respectively), demonstrating no sex effects or diet-sex interaction.
+
+```{r totalHisto_LMM_anova_fixed_effects}
+#Statistical test for fixed effect terms (test if fixed effect term improves models explanation of the data) - diet, sex, diet x sex interaction, ExpNo
+anova(BP_PP_LMM_model)
+```
+###### Random Effects Analysis - Cage Membership
+
+Contribution of the random effect term was assessed with likelihood ratio testing by `ranova()`. The random intercept for cage membership `UniversalCageNumber` was not significant (LRT = 2.914, p = 0.088). The cage term was retained in the model to account for non-independence of cage-mates.
+
+```{r totalHisto_LMM_ranova_random_effects}
+#Statistical test for random effect terms (test if random effect term improves models explanation of the data) - cage membership
+ranova(BP_PP_LMM_model)
+```
+###### Visualization of sex meta-data in diet groups
+
+To visually demonstrate how sex distributed within diet groups, sex meta-data was colored on a plot of diet by total histology score, visually confirming that results do not cluster by sex.
+
+```{r total_Histo_metadata_visualization}
+#Visualization by meta-data
+p <- ggplot(df_BP_PP, aes(x=Diet, y=TotalHistoScore)) +
+  geom_boxplot() +
+  ## plot all data points, colored by meta-data
+  geom_jitter(aes(color = Sex),
+              position = position_jitter(width=0.2),
+              alpha=1) +
+  ## Significance bar for Diet comparison
+  annotate("segment", x = 1, xend = 2, y = 14, yend = 14) +
+  annotate("text", x = 1.5, y = 14.6, label = "p < 0.0001", size = 5) +
+  ##
+  labs(title="Total Histology Score", y="Total Histolgoy Score (0-20)") +
+  ## Plot theme formatting
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size=18),
+    axis.text = element_text(size=18),
+    axis.title=element_text(size=18),
+    legend.text = element_text(size=18),
+    legend.title = element_text(size=18)
+  )
+
+print(p)
+```
+
+#### Total Weight Change
+We fitted a linear mixed effects model with fixed slope, REML=True (best fit estimator) to test the effects of diet (fixed effect, `Beef_Cellulose` vs `Pea_Cellulose`), sex (fixed effect, male vs female), the interaction of diet x sex, experiment batch `ExpNo` (fixed effect), and cage membership (random effect, `UniversalCageNumber`) on % Weight Change `WeightChange`. Preliminary analysis demonstrated that inclusion of `ExpNo` as a fixed effect term improved model fit.
+
+```{r Wt_LMM}
+# Preliminary analysis of model with and without ExpNo as fixed term, REML=FALSE.
+BP_PP_LMM_model_no_ExpNo <- lmer(WeightChange ~ Diet * Sex + (1|UniversalCageNumber), data = df_BP_PP, REML=FALSE)
+BP_PP_LMM_model_WITH_ExpNo <- lmer(WeightChange ~ Diet * Sex + ExpNo + (1|UniversalCageNumber), data = df_BP_PP, REML=FALSE)
+# Compare model fit with and without ExpNo term
+anova(BP_PP_LMM_model_no_ExpNo, BP_PP_LMM_model_WITH_ExpNo)
+
+#Fixed slope, REML=TRUE (best fit estimator)
+BP_PP_LMM_model <- lmer(WeightChange ~ Diet * Sex + ExpNo + (1|UniversalCageNumber), data = df_BP_PP, REML=TRUE)                    
+
+#LMM results
+summary(BP_PP_LMM_model)
+#Fixed effects test
+anova(BP_PP_LMM_model)
+#Test if random effects improve fit
+ranova(BP_PP_LMM_model)
+#Extract confidence intervals
+confint(BP_PP_LMM_model)
+```
+
+##### Results Interpretation for Weight Change
+
+###### Model Residuals and Confirmation of Assumptions 
+The model assumptions were confirmed by analysis of the residuals. Plotting residuals vs fitted showed no systematic patterns, with residuals evenly distributed around zero, confirming the assumptions of linearity and homoscedasticity.
+
+```{r Wt_LMM_residuals}
+plot(resid(BP_PP_LMM_model) ~ fitted(BP_PP_LMM_model))
+abline(h = 0, lty = 2)
+```
+
+The Q-Q plot of the residuals confirmed approximate normality with points falling on the theoretical diagonal.
+
+```{r Wt_LMM_normality}
+qqnorm(resid(BP_PP_LMM_model))
+qqline(resid(BP_PP_LMM_model))
+```
+
+###### Fixed Effects Analysis - Sex, Diet, Sex x Diet Interaction, ExpNo
+
+Significant contribution of fixed effect terms was assessed by Type III ANOVA. The diet term was highly significant (F(1,55) = 105.11, p = 2.267e-14) with an estimated difference of 11.08 % between `Pea_Cellulose` and `Beef_Cellulose` diets. Sex was not-significant (F(1, 55) = 1.09, p = 0.30), but the interaction of `sex x diet` was significant (F(1,55) = 8.44, p = 0.005), indicating diet-sex interaction for % weight change. Experiment batch was retained as a fixed effect term based on preliminary likelihood ratio testing (p=0.001). The Type III F-test for `ExpNo` was significant (p=0.0003), indicating inter-experiment variability was present for % weight change.
+
+```{r Wt_LMM_anova_fixed_effects}
+#Statistical test for fixed effect terms (test if fixed effect term improves models explanation of the data) - diet, sex, diet x sex interaction, ExpNo
+anova(BP_PP_LMM_model)
+```
+
+###### Random Effects Analysis - Cage Membership
+
+Contribution of the random effect term was assessed with likelihood ratio testing by `ranova()`. The random intercept for cage membership `UniversalCageNumber` was not significant (LRT = 0, p = 1), indicating no cage effect. The cage term was retained in the model due to nested cage `UniversalCageNumber` within experiment `ExpNo`.
+
+```{r Wt_LMM_ranova_random_effects}
+#Statistical test for random effect terms (test if random effect term improves models explanation of the data) - cage membership
+ranova(BP_PP_LMM_model)
+```
+
+###### Post-hoc analysis of Diet x Sex interaction
+
+The significant interaction of `sex x diet` (F(1,55) = 8.44, p = 0.005) was interrogated using estimated marginal means with the `emmeans()` function. Because experiment number `ExpNo` was a fixed effects term in the LMM, `emmeans()` computes the model-predicted mean for every group after averaging over co-variates, including `ExpNo`.
+
+####### Diet effect within sex
+
+Post-hoc pairwise analysis demonstrated a significant diet effect in **both** females (estimate = -11.1 % weight change, p = 0.0001) **and** males (estimate = -19.8 % weight change, p <0.0001). Males had a larger magnitude weight change in response to diet.
+
+```{r Wt_diet_within_sex_emmeans}
+
+#Calculate diet effect within sex
+emm_diet_in_sex <- emmeans(BP_PP_LMM_model, ~ Diet | Sex)
+summary(emm_diet_in_sex)
+
+#Compute difference between diets within each sex [ie 1) diet effect in females; 2) diet effect in males]
+contrast_emm_diet_in_sex <- contrast(emm_diet_in_sex, method = "pairwise")
+summary(contrast_emm_diet_in_sex)
+```
+
+####### Sex effect within diet
+
+Post-hoc pairwise analysis of sex effects within each diet demonstrated males lost significantly more weight than females fed `Beef_Cellulose` diet (estimate = 5.94 % weight change, p = 0.0129), but no significant sex difference was found in males and females fed `Pea_Cellulose` diet (estimate = -2.80 % weight change, p = 0.26). Together, these analyses demonstrate that `Beef_Cellulose` diet induces significant weight loss in **both** males and females vs `Pea_Cellulose` diet, but that males have a larger magnitude weight loss, which is driven by `sex x diet` interaction with `Beef_Cellulose` diet only, not `Pea_Cellulose` diet.
+
+```{r Wt_sex_within_diet_emmeans}
+
+#Calculate sex effect within diet
+emm_sex_in_diet <- emmeans(BP_PP_LMM_model, ~ Sex | Diet)
+summary(emm_sex_in_diet)
+
+#Compute difference between sexes within each diet [ie 1) diet effect in females; 2) diet effect in males]
+contrast_emm_sex_in_diet <- contrast(emm_sex_in_diet, method = "pairwise")
+summary(contrast_emm_sex_in_diet)
+```
+
+###### Visualization of sex meta-data in diet groups
+
+To visually demonstrate how sex distributed within diet groups, sex meta-data was colored on a plot of diet by % Weight change level.
+
+```{r Wt_metadata_visualization}
+#Visualization by meta-data
+p <- ggplot(df_BP_PP, aes(x=Diet, y=WeightChange, shape=Sex)) +
+  geom_boxplot() +
+  ## plot all data points, colored by meta-data
+  geom_jitter(aes(color = Sex),
+              position = position_jitterdodge(jitter.width=0.2),
+              alpha=1) +
+  ## Add significant bars for sex comparisons within diet
+  annotate("segment", x = 0.625, xend = 1.375, y = 12, yend = 12) +
+  annotate("text", x = 1, y = 15, label = "p = 0.013", size = 5) +
+  ## Pea_Cellulose: F vs M, p = 0.26 (ns)
+  annotate("segment", x = 1.625, xend = 2.375, y = 22, yend = 22) +
+  annotate("text", x = 2, y = 25, label = "ns", size = 5) +
+  
+  ##
+  labs(title="% Weight Change", y="Weight Change (%)") +
+  ## Plot theme formatting
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size=18),
+    axis.text = element_text(size=18),
+    axis.title=element_text(size=18),
+    legend.text = element_text(size=18),
+    legend.title = element_text(size=18)
+  )
+
+print(p)
+```
